@@ -40,6 +40,27 @@
     - database
     - skip_ansible_lint
   block:
+    - name: "MySQL | Register active MySQL authentication plugins"
+      community.mysql.mysql_query:
+        login_user: "{{ zabbix_proxy_mysql_login_user | default(omit) }}"
+        login_password: "{{ zabbix_proxy_mysql_login_password | default(omit) }}"
+        login_host: "{{ zabbix_proxy_mysql_login_host | default(omit) }}"
+        login_port: "{{ zabbix_proxy_mysql_login_port | default(omit) }}"
+        login_db: "mysql"
+        query: "SELECT PLUGIN_NAME FROM INFORMATION_SCHEMA.PLUGINS WHERE PLUGIN_TYPE='AUTHENTICATION' AND PLUGIN_STATUS='ACTIVE';"
+      register: zabbix_proxy_active_mysql_authentication_plugins
+
+    # Selects best authentication plugin based on the list order of zabbix_proxy_mysql_auth_plugin_priority
+    - name: MySQL | Determine best authentication plugin
+      ansible.builtin.set_fact:
+        zabbix_proxy_mysql_authentication_plugin: >-
+          "{{ zabbix_proxy_mysql_auth_plugin_priority | select('in', ((zabbix_proxy_active_mysql_authentication_plugins.query_result | flatten) | map(attribute='PLUGIN_NAME'))) | list | first }}"
+      vars:
+        zabbix_proxy_mysql_auth_plugin_priority:
+          - caching_sha2_password
+          - sha256_password
+          - mysql_native_password
+
     - name: "MySQL | Create database"
       community.mysql.mysql_db:
         login_user: "{{ zabbix_proxy_mysql_login_user | default(omit) }}"
@@ -61,9 +82,9 @@
         login_port: "{{ zabbix_proxy_mysql_login_port | default(omit) }}"
         login_unix_socket: "{{ zabbix_proxy_mysql_login_unix_socket | default(omit) }}"
         name: "{{ zabbix_proxy_dbuser }}"
-        password: "{{ (zabbix_proxy_mysql_auth_plugin == 'mysql_native_password') | ternary(zabbix_proxy_dbpassword, omit) }}"
-        plugin_auth_string: "{{ (zabbix_proxy_mysql_auth_plugin in ['caching_sha2_password', 'sha256_password']) | ternary(zabbix_proxy_dbpassword, omit) }}"
-        plugin: "{{ zabbix_proxy_mysql_auth_plugin | default(omit) }}"
+        password: "{{ (zabbix_proxy_mysql_authentication_plugin == 'mysql_native_password') | ternary(zabbix_proxy_dbpassword, omit) }}"
+        plugin_auth_string: "{{ (zabbix_proxy_mysql_authentication_plugin in ['caching_sha2_password', 'sha256_password']) | ternary(zabbix_proxy_dbpassword, omit) }}"
+        plugin: "{{ zabbix_proxy_mysql_authentication_plugin | default(omit) }}"
         salt: "{{ zabbix_proxy_mysql_auth_plugin_salt | default(omit) }}"
         host: "{{ zabbix_proxy_privileged_host }}"
         priv: "{{ zabbix_proxy_dbname }}.*:ALL"
