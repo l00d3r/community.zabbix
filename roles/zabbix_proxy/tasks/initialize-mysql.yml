@@ -48,20 +48,40 @@
         login_port: "{{ zabbix_proxy_mysql_login_port | default(omit) }}"
         login_db: "mysql"
         query: "SELECT PLUGIN_NAME FROM INFORMATION_SCHEMA.PLUGINS WHERE PLUGIN_TYPE='AUTHENTICATION' AND PLUGIN_STATUS='ACTIVE';"
-      register: zabbix_proxy_active_mysql_authentication_plugins
+      register: _zabbix_proxy_auth_plugins
 
-    # Selects best authentication plugin based on the list order of zabbix_proxy_mysql_auth_plugin_priority
+    - name: MySQL | Ensure that user selected authentication plugin is supported by the MySQL server
+      when: zabbix_proxy_mysql_auth_plugin is defined
+      ansible.builtin.assert:
+        that:
+          - zabbix_proxy_mysql_auth_plugin in _zabbix_proxy_auth_plugins_list
+        fail_msg: The defined auth plugin {{ zabbix_proxy_mysql_auth_plugin }} is not active on MySQL server
+      vars:
+        _zabbix_proxy_auth_plugins_list: "{{ _zabbix_proxy_auth_plugins.query_result | flatten | map(attribute='PLUGIN_NAME') }}"
+
+    - name: MySQL | Ensure that user selected salt for authentication plugin is 20 characters long
+      when: zabbix_proxy_mysql_auth_salt is defined
+      ansible.builtin.assert:
+        that:
+          - (zabbix_proxy_mysql_auth_salt | length) == 20
+        fail_msg: The defined salt for authentication plugin is not 20 characters long
+
+    # Selects best authentication plugin based on the list order of _zabbix_proxy_auth_plugin_priority
     - name: MySQL | Determine best authentication plugin
       ansible.builtin.set_fact:
-        zabbix_proxy_mysql_authentication_plugin: >-
+        _zabbix_proxy_auth_plugin: >-
           {{
-            zabbix_proxy_mysql_auth_plugin_priority
-            | select('in', ((zabbix_proxy_active_mysql_authentication_plugins.query_result | flatten) | map(attribute='PLUGIN_NAME')))
-            | list
-            | first
+              zabbix_proxy_mysql_auth_plugin is defined
+              | ternary(zabbix_proxy_mysql_auth_plugin, _zabbix_proxy_auth_plugin_priority | select('in', _zabbix_proxy_auth_plugins_list) | first)
+          }}
+        _zabbix_proxy_auth_salt: >-
+          {{
+              zabbix_proxy_mysql_auth_salt is defined
+              | ternary(zabbix_proxy_mysql_auth_salt, lookup('ansible.builtin.password', '/tmp/saltfile', length=20))
           }}
       vars:
-        zabbix_proxy_mysql_auth_plugin_priority:
+        _zabbix_proxy_auth_plugins_list: "{{ _zabbix_proxy_auth_plugins.query_result | flatten | map(attribute='PLUGIN_NAME') }}"
+        _zabbix_proxy_auth_plugin_priority:
           - caching_sha2_password
           - sha256_password
           - mysql_native_password
@@ -87,13 +107,16 @@
         login_port: "{{ zabbix_proxy_mysql_login_port | default(omit) }}"
         login_unix_socket: "{{ zabbix_proxy_mysql_login_unix_socket | default(omit) }}"
         name: "{{ zabbix_proxy_dbuser }}"
-        password: "{{ (zabbix_proxy_mysql_authentication_plugin in ['mysql_native_password']) | ternary(zabbix_proxy_dbpassword, omit) }}"
-        plugin_auth_string: "{{ (zabbix_proxy_mysql_authentication_plugin in ['caching_sha2_password', 'sha256_password']) | ternary(zabbix_proxy_dbpassword, omit) }}"
-        plugin: "{{ zabbix_proxy_mysql_authentication_plugin | default(omit) }}"
-        salt: "{{ zabbix_proxy_mysql_auth_plugin_salt | default(omit) }}"
+        password: "{{ _zabbix_proxy_legacy_auth | ternary(zabbix_proxy_dbpassword, omit) }}"
+        plugin_auth_string: "{{ _zabbix_proxy_modern_auth | ternary(zabbix_proxy_dbpassword, omit) }}"
+        plugin: "{{ _zabbix_proxy_auth_plugin }}"
+        salt: "{{ _zabbix_proxy_modern_auth | ternary(_zabbix_proxy_auth_salt, omit) }}"
         host: "{{ zabbix_proxy_privileged_host }}"
         priv: "{{ zabbix_proxy_dbname }}.*:ALL"
         state: present
+      vars:
+        _zabbix_proxy_legacy_auth: "{{ _zabbix_proxy_auth_plugin == 'mysql_native_password' }}"
+        _zabbix_proxy_modern_auth: "{{ _zabbix_proxy_auth_plugin in ['caching_sha2_password', 'sha256_password'] }}"
 
 - name: "MySQL verify or create schema"
   when: zabbix_proxy_database_sqlload | bool
