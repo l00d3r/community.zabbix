@@ -51,10 +51,10 @@
       when: zabbix_server_mysql_auth_plugin is defined
       ansible.builtin.assert:
         that:
-          - zabbix_server_mysql_auth_plugin in _zabbix_server_auth_plugins
+          - zabbix_server_mysql_auth_plugin in _zabbix_server_auth_plugins_list
         fail_msg: The defined auth plugin {{ zabbix_server_mysql_auth_plugin }} is not active on MySQL server
       vars:
-        _zabbix_server_auth_plugins: "{{ _zabbix_server_auth_plugins.query_result | flatten | map(attribute='PLUGIN_NAME') }}"
+        _zabbix_server_auth_plugins_list: "{{ _zabbix_server_auth_plugins.query_result | flatten | map(attribute='PLUGIN_NAME') }}"
 
     - name: MySQL | Ensure that user selected salt for authentication plugin is 20 characters long
       when: zabbix_server_mysql_auth_salt is defined
@@ -66,12 +66,12 @@
     # Selects best authentication plugin based on the list order of _zabbix_server_auth_plugin_priority
     - name: MySQL | Determine best authentication plugin
       ansible.builtin.set_fact:
-        _zabbix_server_auth_plugin: >-
+        zabbix_server_mysql_auth_plugin: >-
           {{
               zabbix_server_mysql_auth_plugin is defined
               | ternary(zabbix_server_mysql_auth_plugin, _zabbix_server_auth_plugin_priority | select('in', _zabbix_server_auth_plugins_list) | first)
           }}
-        _zabbix_server_auth_salt: >-
+        zabbix_server_mysql_auth_salt: >-
           {{
               zabbix_server_mysql_auth_salt is defined
               | ternary(zabbix_server_mysql_auth_salt, lookup('ansible.builtin.password', '/tmp/saltfile', length=20))
@@ -108,14 +108,14 @@
         name: "{{ zabbix_server_dbuser }}"
         password: "{{ _zabbix_server_legacy_auth | ternary(zabbix_server_dbpassword, omit) }}"
         plugin_auth_string: "{{ _zabbix_server_modern_auth | ternary(zabbix_server_dbpassword, omit) }}"
-        plugin: "{{ _zabbix_server_auth_plugin }}"
-        salt: "{{ _zabbix_server_modern_auth | ternary(_zabbix_server_auth_salt, omit) }}"
+        plugin: "{{ zabbix_server_mysql_auth_plugin }}"
+        salt: "{{ _zabbix_server_modern_auth | ternary(zabbix_server_mysql_auth_salt, omit) }}"
         host: "{{ zabbix_server_privileged_host }}"
         priv: "{{ zabbix_server_dbname }}.*:ALL"
         state: present
       vars:
-        _zabbix_server_legacy_auth: "{{ _zabbix_server_auth_plugin == 'mysql_native_password' }}"
-        _zabbix_server_modern_auth: "{{ _zabbix_server_auth_plugin in ['caching_sha2_password', 'sha256_password'] }}"
+        _zabbix_server_legacy_auth: "{{ zabbix_server_mysql_auth_plugin == 'mysql_native_password' }}"
+        _zabbix_server_modern_auth: "{{ zabbix_server_mysql_auth_plugin in ['caching_sha2_password', 'sha256_password'] }}"
 
 - name: "MySQL verify or create schema"
   when: zabbix_server_database_sqlload | bool

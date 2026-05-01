@@ -69,12 +69,12 @@
     # Selects best authentication plugin based on the list order of _zabbix_proxy_auth_plugin_priority
     - name: MySQL | Determine best authentication plugin
       ansible.builtin.set_fact:
-        _zabbix_proxy_auth_plugin: >-
+        zabbix_proxy_mysql_auth_plugin: >-
           {{
               zabbix_proxy_mysql_auth_plugin is defined
               | ternary(zabbix_proxy_mysql_auth_plugin, _zabbix_proxy_auth_plugin_priority | select('in', _zabbix_proxy_auth_plugins_list) | first)
           }}
-        _zabbix_proxy_auth_salt: >-
+        zabbix_proxy_mysql_auth_salt: >-
           {{
               zabbix_proxy_mysql_auth_salt is defined
               | ternary(zabbix_proxy_mysql_auth_salt, lookup('ansible.builtin.password', '/tmp/saltfile', length=20))
@@ -109,14 +109,14 @@
         name: "{{ zabbix_proxy_dbuser }}"
         password: "{{ _zabbix_proxy_legacy_auth | ternary(zabbix_proxy_dbpassword, omit) }}"
         plugin_auth_string: "{{ _zabbix_proxy_modern_auth | ternary(zabbix_proxy_dbpassword, omit) }}"
-        plugin: "{{ _zabbix_proxy_auth_plugin }}"
-        salt: "{{ _zabbix_proxy_modern_auth | ternary(_zabbix_proxy_auth_salt, omit) }}"
+        plugin: "{{ zabbix_proxy_mysql_auth_plugin }}"
+        salt: "{{ _zabbix_proxy_modern_auth | ternary(zabbix_proxy_mysql_auth_salt, omit) }}"
         host: "{{ zabbix_proxy_privileged_host }}"
         priv: "{{ zabbix_proxy_dbname }}.*:ALL"
         state: present
       vars:
-        _zabbix_proxy_legacy_auth: "{{ _zabbix_proxy_auth_plugin == 'mysql_native_password' }}"
-        _zabbix_proxy_modern_auth: "{{ _zabbix_proxy_auth_plugin in ['caching_sha2_password', 'sha256_password'] }}"
+        _zabbix_proxy_legacy_auth: "{{ zabbix_proxy_mysql_auth_plugin == 'mysql_native_password' }}"
+        _zabbix_proxy_modern_auth: "{{ zabbix_proxy_mysql_auth_plugin in ['caching_sha2_password', 'sha256_password'] }}"
 
 - name: "MySQL verify or create schema"
   when: zabbix_proxy_database_sqlload | bool
